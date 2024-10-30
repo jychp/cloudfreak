@@ -1,0 +1,44 @@
+name: 'Terraform checks'
+
+on:
+  workflow_call:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  fmt:
+    runs-on: "ubuntu-latest"
+    timeout-minutes: 5
+    steps:
+      - name: Setup NodeJS 20 required by hashicorp/setup-terraform@v3
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - uses: actions/checkout@v4
+        name: Checkout source code
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.6.6
+
+      - name: Terraform FMT
+        run: terraform fmt -check -recursive -diff .
+
+  lint:
+    runs-on: "ubuntu-latest"
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+        name: Checkout source code
+
+      - uses: terraform-linters/setup-tflint@v4
+        name: Setup TFLint
+        with:
+          tflint_version: latest
+
+      - name: TF lint
+        run: tflint -f compact --recursive --disable-rule terraform_required_providers --disable-rule terraform_required_version
