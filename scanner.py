@@ -2,13 +2,14 @@ import argparse
 import asyncio
 import json
 import os
-import xml.etree.ElementTree as ET
-import requests
 import re
 import sys
+import xml.etree.ElementTree as ET
+from typing import Any
 
 import aiohttp
 import netaddr
+import requests
 from loguru import logger
 
 INCLUDED_FILES = {
@@ -38,12 +39,12 @@ class Rapid7Recog:
             return params
         return None
 
-    def check(self, data: str):
+    def check(self, data: str) -> dict[str, str]:
         # Check for SSH banners
         if data.startswith('SSH-'):
             logger.debug(f'SSH banner detected in {data}')
             stripped_banner = data.strip()
-            _ ,__ ,stripped_banner = stripped_banner.split('-', 2)
+            _, __, stripped_banner = stripped_banner.split('-', 2)
             print(stripped_banner)
             for regex in self._regex['ssh-banners']:
                 result = self._filter_match(stripped_banner, regex)
@@ -70,6 +71,7 @@ class Rapid7Recog:
                 result = self._filter_match(stripped_banner, regex)
                 if result:
                     return result
+        return {}
 
     def _load(self):
         for category, files in INCLUDED_FILES.items():
@@ -99,18 +101,20 @@ class Rapid7Recog:
                 pattern_regex = re.compile(pattern_value, flags=re.IGNORECASE)
             else:
                 pattern_regex = re.compile(pattern_value)
-            result = {
-                'regex': pattern_regex,
-                'params': [],
-                'positional': []
-            }
+            params: list[dict[str, Any]] = []
+            positional: list[dict[str, Any]] = []
             for child in pattern:
                 if child.tag != 'param':
                     continue
                 if child.attrib['pos'] == '0':
-                    result['params'].append(child.attrib)
+                    params.append(child.attrib)
                 else:
-                    result['positional'].append(child.attrib)
+                    positional.append(child.attrib)
+            result = {
+                'regex': pattern_regex,
+                'params': params,
+                'positional': positional,
+            }
             results.append(result)
         return results
 
@@ -138,32 +142,67 @@ async def main(
     worker_url: str,
     targets: list[dict[str, str]],
     parallelism: int,
+    output_file: str | None,
 ):
     r7recog = Rapid7Recog()
-    open_ports_per_host: dict[str, dict[int, str]] = {}
+    formated_data: dict[str, dict[int, dict[str, Any]]] = {}
 
     # Do scans
     scan_semaphore = asyncio.Semaphore(parallelism)
     async with aiohttp.ClientSession() as session:
         tasks = [scan(args.worker, session, scan_semaphore, payload) for payload in split_list(targets, parallelism)]
         results = await asyncio.gather(*tasks)
-        for raw_result, status in results:
+        for raw_result, _ in results:
             json_result = json.loads(raw_result)
             for line in json_result['scan_results']:
+                if line['host'] not in formated_data:
+                    formated_data[line['host']] = {}
                 if not line['open']:
+                    formated_data[line['host']][int(line['port'])] = {
+                        'status': 'closed/filtered',
+                        'data': line['data'],
+                        'information': {},
+                    }
                     continue
                 params = r7recog.check(line['data'])
-                try:
-                    open_ports_per_host[line['host']][int(line['port'])] = {'data': line['data'], 'params': params}
-                except KeyError:
-                    open_ports_per_host[line['host']] = {int(line['port']): {'data': line['data'], 'params': params}}
+                formated_data[line['host']][int(line['port'])] = {
+                    'status': 'open',
+                    'data': line['data'],
+                    'information': params,
+                }
 
     # Display results
-    for host, ports in open_ports_per_host.items():
-        logger.info(f"Host: {host}")
+    for host, ports in formated_data.items():
+        services: list[tuple] = []
         for port, data in ports.items():
-            logger.info(f"  Port: {port}")
-            logger.info(f"  Params: {data['params']}")
+            if data['status'] == 'open':
+                if 'service.product' in data['information']:
+                    if 'service.version' in data['information']:
+                        service_name = f"{port} - {data['information']['service.product']} " \
+                            f"{data['information']['service.version']}"
+                    else:
+                        service_name = f"{port} - {data['information']['service.product']}"
+                else:
+                    service_name = f"{port} - unknown"
+                services.append((service_name, data['information']))
+
+        if len(services) > 0:
+            print(f"Host: {host} - {len(services)} open ports")
+            for svc in services:
+                print(f"  {svc[0]}")
+                for key, value in svc[1].items():
+                    print(f"    {key}: {value}")
+            print()
+
+    # Save results
+    if output_file:
+        try:
+            with open(output_file, 'w') as f:
+                f.write(json.dumps(formated_data, indent=4))
+        except FileNotFoundError:
+            logger.error(f"Could not write to {output_file}, dumping to stdout instead")
+            print(json.dumps(formated_data, indent=4))
+            exit(1)
 
 
 if __name__ == '__main__':
@@ -194,6 +233,12 @@ if __name__ == '__main__':
         help="URL of the Cloudflare Worker",
     )
     parser.add_argument(
+        '-o',
+        '--output',
+        type=str,
+        help='JSON output file path',
+    )
+    parser.add_argument(
         '--parallelism',
         type=int,
         default=5,
@@ -222,9 +267,23 @@ if __name__ == '__main__':
     # VERBOSITY
     logger.remove()
     if args.verbose:
-        logger.add(sys.stderr, level="DEBUG", format="<green>{time:YYYY/MM/DD HH:mm:ss}</green> | <level>{level}</level> | {message}", colorize=True)
+        logger.add(
+            sys.stderr,
+            level="DEBUG",
+            format="<green>{time:YYYY/MM/DD HH:mm:ss}</green> | <level>{level}</level> | {message}",
+            colorize=True,
+        )
     else:
-        logger.add(sys.stderr, level="INFO", format="<green>{time:YYYY/MM/DD HH:mm:ss}</green> | <level>{level}</level> | {message}", colorize=True)
+        logger.add(
+            sys.stderr,
+            level="INFO",
+            format="<green>{time:YYYY/MM/DD HH:mm:ss}</green> | <level>{level}</level> | {message}",
+            colorize=True,
+        )
+    # CHECKS
+    if args.output and not args.output.endswith('.json'):
+        logger.error("Output file must be a JSON file")
+        exit(1)
 
     # HOSTS
     hosts: list[str] = []
@@ -268,4 +327,4 @@ if __name__ == '__main__':
 
     concurrency = min(args.parallelism, len(targets))
     logger.info(f"Scanning {len(targets)} targets with {concurrency} workers")
-    asyncio.run(main(args.worker, targets, concurrency))
+    asyncio.run(main(args.worker, targets, concurrency, args.output))

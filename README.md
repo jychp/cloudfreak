@@ -23,14 +23,11 @@ https://developers.cloudflare.com/workers/platform/limits/
 
 
 
-
+poetry run python3 scanner.py <IP> -p 21,22,8899 -w <WORKER_URL> -v --output output.json
 
 TODO:
 [ ] Scan hosts from file
 [ ] README
-[ ] Set verbose + loguru format
-[ ] Export result as JSON
-[ ] Better output
 [ ] Exclude IP
 [ ] Exclude from file
 [ ] Host Timeout as header
