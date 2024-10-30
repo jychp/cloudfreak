@@ -1,36 +1,59 @@
 import argparse
 import asyncio
-import aiohttp
+import json
 
-from loguru import logger
+import aiohttp
 import netaddr
+from loguru import logger
 
 
 async def scan(
-    worker_url: str, 
-    session: aiohttp.ClientSession, 
-    semaphore: asyncio.Semaphore,
-    targets: list[dict[str: str]]):
+        worker_url: str,
+        session: aiohttp.ClientSession,
+        semaphore: asyncio.Semaphore,
+        targets: list[dict[str, str]],
+):
     payload = {"targets": targets}
     async with semaphore:
         async with session.post(worker_url, json=payload) as response:
             result = await response.text()
+            logger.debug(f"Response: {result}")
             return result, response.status
 
 
-def split_list(lst: list[any], n: int):
+def split_list(lst: list, n: int):
     k, m = divmod(len(lst), n)
     return [lst[i * k + min(i, m):(i + 1) * k + min(i + 1, m)] for i in range(n)]
 
 
-async def main(worker_url: str, targets: list[dict[str: str]], parallelism: int):
-    # SCAN
+async def main(
+    worker_url: str,
+    targets: list[dict[str, str]],
+    parallelism: int,
+):
+    open_ports_per_host: dict[str, dict[int, str]] = {}
+
+    # Do scans
     scan_semaphore = asyncio.Semaphore(parallelism)
     async with aiohttp.ClientSession() as session:
         tasks = [scan(args.worker, session, scan_semaphore, payload) for payload in split_list(targets, parallelism)]
         results = await asyncio.gather(*tasks)
-        for result, status in results:
-            print(result, status)
+        for raw_result, status in results:
+            json_result = json.loads(raw_result)
+            for line in json_result['scan_results']:
+                if not line['open']:
+                    continue
+                try:
+                    open_ports_per_host[line['host']][int(line['port'])] = line['data']
+                except KeyError:
+                    open_ports_per_host[line['host']] = {int(line['port']): line['data']}
+
+    # Display results
+    for host, ports in open_ports_per_host.items():
+        logger.info(f"Host: {host}")
+        for port, data in ports.items():
+            logger.info(f"  Port: {port}")
+            logger.info(f"  Data: {data}")
 
 
 if __name__ == '__main__':
@@ -52,8 +75,7 @@ if __name__ == '__main__':
     # -O: OS detection
     # --host-timeout
     # TODO: add a secret key
-    # add: --ssl
-    # add: --data
+
     parser.add_argument(
         '-p',
         type=str,
@@ -65,7 +87,7 @@ if __name__ == '__main__':
         "--worker",
         type=str,
         required=True,
-        help="URL of the Cloudflare Worker"
+        help="URL of the Cloudflare Worker",
     )
     parser.add_argument(
         '--parallelism',
@@ -77,6 +99,12 @@ if __name__ == '__main__':
         '--ssl',
         action='store_true',
         help='Enable SSL connection',
+    )
+    parser.add_argument(
+        '--data',
+        type=str,
+        help='Data to send to the server',
+        default='GET / HTTP/1.1\r\n\r\n',
     )
     parser.add_argument(
         'target',
@@ -109,7 +137,7 @@ if __name__ == '__main__':
         ports = [int(args.p)]
 
     # BUILD TARGETS list
-    targets: list[dict[str: str]] = []
+    targets: list[dict[str, str]] = []
     if len(hosts) == 0:
         logger.error("No valid targets provided")
         exit(1)
@@ -121,7 +149,7 @@ if __name__ == '__main__':
             target = {
                 'host': host,
                 'port': port,
-                'data': '',
+                'data': args.data,
                 'ssl': args.ssl,
             }
             logger.debug(f"Adding {target} to targets")
