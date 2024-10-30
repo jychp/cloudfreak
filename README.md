@@ -20,3 +20,18 @@ https://dash.cloudflare.com/<ACCOUNT_ID>/workers/services/view/cf-scanner/produc
 
 
 https://developers.cloudflare.com/workers/platform/limits/
+
+
+
+
+
+TODO:
+[ ] Scan hosts from file
+[ ] README
+[ ] Set verbose + loguru format
+[ ] Export result as JSON
+[ ] Better output
+[ ] Exclude IP
+[ ] Exclude from file
+[ ] Host Timeout as header
+[ ] Auth with secret key

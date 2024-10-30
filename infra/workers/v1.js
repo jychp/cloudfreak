@@ -15,7 +15,11 @@ async function readStreamWithTimeout(stream, timeout) {
       buffer += new TextDecoder().decode(value);
       return buffer;
     } catch (error) {
-      throw error;
+      if (buffer.length > 0) {
+        return buffer;
+      } else {
+        throw error;
+      }
     }
   }
   return buffer;

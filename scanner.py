@@ -1,10 +1,116 @@
 import argparse
 import asyncio
 import json
+import os
+import xml.etree.ElementTree as ET
+import requests
+import re
 
 import aiohttp
 import netaddr
 from loguru import logger
+
+INCLUDED_FILES = {
+    'ssh-banners': ['https://raw.githubusercontent.com/rapid7/recog/master/xml/ssh_banners.xml'],
+    'http-servers': ['https://raw.githubusercontent.com/rapid7/recog/master/xml/http_servers.xml'],
+    'ftp-banners': ['https://raw.githubusercontent.com/rapid7/recog/master/xml/ftp_banners.xml'],
+}
+
+DATA_DIR = './data'
+
+
+class Rapid7Recog:
+    def __init__(self):
+        self._regex: dict = {}
+
+        self._load()
+
+    def _filter_match(self, data: str, re_filter: dict):
+        params = {}
+        test = re_filter['regex'].match(data)
+        if test:
+            if len(re_filter['positional']) > 0:
+                for param in re_filter['positional']:
+                    params[param['name']] = test.groups()[int(param['pos']) - 1]
+            for r in re_filter['params']:
+                params[r['name']] = r['value']
+            return params
+        return None
+
+    def check(self, data: str):
+        # Check for SSH banners
+        if data.startswith('SSH-'):
+            logger.debug('Detected SSH banner')
+            stripped_banner = data.strip()
+            _ ,__ ,stripped_banner = stripped_banner.split('-', 2)
+            print(stripped_banner)
+            for regex in self._regex['ssh-banners']:
+                result = self._filter_match(stripped_banner, regex)
+                if result:
+                    return result
+            return {'service.product': 'generic-ssh'}
+        # Check for HTTP responses
+        if data.startswith('HTTP/'):
+            logger.debug('Detected HTTP response')
+            # Try server header
+            test = re.findall(r'^Server:\S?(.*)$', data, flags=re.MULTILINE)
+            if len(test) > 0:
+                stripped_server = test[0].strip()
+                for regex in self._regex['http-servers']:
+                    result = self._filter_match(stripped_server, regex)
+                    if result:
+                        return result
+        # Check for FTP banners
+        if data.startswith('220 '):
+            logger.debug('Detected FTP banner')
+            stripped_banner = data[4:].strip()
+            for regex in self._regex['ftp-banners']:
+                result = self._filter_match(stripped_banner, regex)
+                if result:
+                    return result
+
+    def _load(self):
+        for category, files in INCLUDED_FILES.items():
+            self._regex[category] = []
+            for file in files:
+                if file.startswith('https://'):
+                    short_name = file.split('/')[-1]
+                    if not os.path.isfile(os.path.join(DATA_DIR, short_name)):
+                        self._download(short_name, file, os.path.join(DATA_DIR, short_name))
+                    self._regex[category] = self._parse(os.path.join(DATA_DIR, short_name))
+                logger.info(f"Loaded {len(self._regex[category])} regexes for {category}")
+
+    def _download(self, short_name, url, path):
+        logger.info(f"Downloading banner data: {url} to {path}")
+        req = requests.get(url, timeout=10)
+        with open(path, 'wb') as f:
+            f.write(req.content)
+
+    def _parse(self, path) -> list[dict]:
+        tree = ET.parse(path)
+        root = tree.getroot()
+        results = []
+        for pattern in root:
+            pattern_value = pattern.attrib['pattern']
+            if '(?i)' in pattern_value:
+                pattern_value = pattern_value.replace('(?i)', '')
+                pattern_regex = re.compile(pattern_value, flags=re.IGNORECASE)
+            else:
+                pattern_regex = re.compile(pattern_value)
+            result = {
+                'regex': pattern_regex,
+                'params': [],
+                'positional': []
+            }
+            for child in pattern:
+                if child.tag != 'param':
+                    continue
+                if child.attrib['pos'] == '0':
+                    result['params'].append(child.attrib)
+                else:
+                    result['positional'].append(child.attrib)
+            results.append(result)
+        return results
 
 
 async def scan(
@@ -31,6 +137,8 @@ async def main(
     targets: list[dict[str, str]],
     parallelism: int,
 ):
+    r7recog = Rapid7Recog()
+
     open_ports_per_host: dict[str, dict[int, str]] = {}
 
     # Do scans
@@ -43,17 +151,18 @@ async def main(
             for line in json_result['scan_results']:
                 if not line['open']:
                     continue
+                params = r7recog.check(line['data'])
                 try:
-                    open_ports_per_host[line['host']][int(line['port'])] = line['data']
+                    open_ports_per_host[line['host']][int(line['port'])] = {'data': line['data'], 'params': params}
                 except KeyError:
-                    open_ports_per_host[line['host']] = {int(line['port']): line['data']}
+                    open_ports_per_host[line['host']] = {int(line['port']): {'data': line['data'], 'params': params}}
 
     # Display results
     for host, ports in open_ports_per_host.items():
         logger.info(f"Host: {host}")
         for port, data in ports.items():
             logger.info(f"  Port: {port}")
-            logger.info(f"  Data: {data}")
+            logger.info(f"  Params: {data['params']}")
 
 
 if __name__ == '__main__':
@@ -70,9 +179,6 @@ if __name__ == '__main__':
     # TODO: -iL (include list)
     # TODO: --exlude (comma separated)
     # TODO: --excludefile
-    # TODO: -F (fast scan with default ports)
-    # -sV: service version detection
-    # -O: OS detection
     # --host-timeout
     # TODO: add a secret key
 
