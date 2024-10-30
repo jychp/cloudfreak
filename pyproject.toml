@@ -1,0 +1,19 @@
+[tool.poetry]
+name = "cf-scanner"
+version = "1.0.0"
+description = "Automation for Vanta."
+authors = ["Jeremy Chapeau <jeremy.chapeau@resilience.care>"]
+readme = "README.md"
+package-mode = false
+
+[tool.poetry.dependencies]
+python = "^3.10"
+dynaconf = "^3.2.6"
+requests = "^2.32.3"
+loguru = "^0.7.2"
+netaddr = "^1.3.0"
+aiohttp = "^3.10.10"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
