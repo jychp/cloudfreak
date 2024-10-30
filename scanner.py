@@ -5,6 +5,7 @@ import os
 import xml.etree.ElementTree as ET
 import requests
 import re
+import sys
 
 import aiohttp
 import netaddr
@@ -21,8 +22,8 @@ DATA_DIR = './data'
 
 class Rapid7Recog:
     def __init__(self):
+        logger.info("Bootstraping Rapid7 Recog data for service identification")
         self._regex: dict = {}
-
         self._load()
 
     def _filter_match(self, data: str, re_filter: dict):
@@ -40,7 +41,7 @@ class Rapid7Recog:
     def check(self, data: str):
         # Check for SSH banners
         if data.startswith('SSH-'):
-            logger.debug('Detected SSH banner')
+            logger.debug(f'SSH banner detected in {data}')
             stripped_banner = data.strip()
             _ ,__ ,stripped_banner = stripped_banner.split('-', 2)
             print(stripped_banner)
@@ -51,10 +52,11 @@ class Rapid7Recog:
             return {'service.product': 'generic-ssh'}
         # Check for HTTP responses
         if data.startswith('HTTP/'):
-            logger.debug('Detected HTTP response')
+            logger.debug(f'HTTP data detected in {data}')
             # Try server header
             test = re.findall(r'^Server:\S?(.*)$', data, flags=re.MULTILINE)
             if len(test) > 0:
+                logger.debug(f'Detected HTTP server header: {test[0]}')
                 stripped_server = test[0].strip()
                 for regex in self._regex['http-servers']:
                     result = self._filter_match(stripped_server, regex)
@@ -62,7 +64,7 @@ class Rapid7Recog:
                         return result
         # Check for FTP banners
         if data.startswith('220 '):
-            logger.debug('Detected FTP banner')
+            logger.debug(f'FTP header detected in {data}')
             stripped_banner = data[4:].strip()
             for regex in self._regex['ftp-banners']:
                 result = self._filter_match(stripped_banner, regex)
@@ -123,7 +125,7 @@ async def scan(
     async with semaphore:
         async with session.post(worker_url, json=payload) as response:
             result = await response.text()
-            logger.debug(f"Response: {result}")
+            logger.debug(f"Response received from a worker: {result}")
             return result, response.status
 
 
@@ -138,7 +140,6 @@ async def main(
     parallelism: int,
 ):
     r7recog = Rapid7Recog()
-
     open_ports_per_host: dict[str, dict[int, str]] = {}
 
     # Do scans
@@ -168,20 +169,17 @@ async def main(
 if __name__ == '__main__':
     # ARGS PARSING
     parser = argparse.ArgumentParser("cf-scanner")
-    '''
     parser.add_argument(
         '-v',
         '--verbose',
         help="Display debug level messsages",
         action='store_true',
     )
-    '''
     # TODO: -iL (include list)
     # TODO: --exlude (comma separated)
     # TODO: --excludefile
     # --host-timeout
     # TODO: add a secret key
-
     parser.add_argument(
         '-p',
         type=str,
@@ -220,6 +218,13 @@ if __name__ == '__main__':
         help='hostnames, IPs, CIDRs to scan',
     )
     args = parser.parse_args()
+
+    # VERBOSITY
+    logger.remove()
+    if args.verbose:
+        logger.add(sys.stderr, level="DEBUG", format="<green>{time:YYYY/MM/DD HH:mm:ss}</green> | <level>{level}</level> | {message}", colorize=True)
+    else:
+        logger.add(sys.stderr, level="INFO", format="<green>{time:YYYY/MM/DD HH:mm:ss}</green> | <level>{level}</level> | {message}", colorize=True)
 
     # HOSTS
     hosts: list[str] = []
@@ -262,4 +267,5 @@ if __name__ == '__main__':
             targets.append(target)
 
     concurrency = min(args.parallelism, len(targets))
+    logger.info(f"Scanning {len(targets)} targets with {concurrency} workers")
     asyncio.run(main(args.worker, targets, concurrency))
