@@ -143,6 +143,7 @@ async def main(
     targets: list[dict[str, str]],
     parallelism: int,
     apikey: str,
+    timeout: int,
     output_file: str | None = None,
 ):
     r7recog = Rapid7Recog()
@@ -151,7 +152,10 @@ async def main(
     # Do scans
     scan_semaphore = asyncio.Semaphore(parallelism)
     async with aiohttp.ClientSession() as session:
-        session.headers.update({'X-Api-Key': apikey})
+        session.headers.update({
+            'X-Api-Key': apikey,
+            'X-Socket-Timeout': str(timeout),
+        })
         tasks = [scan(args.worker, session, scan_semaphore, payload) for payload in split_list(targets, parallelism)]
         results = await asyncio.gather(*tasks)
         for raw_result, status in results:
@@ -269,6 +273,12 @@ if __name__ == '__main__':
         default='GET / HTTP/1.1\r\n\r\n',
     )
     parser.add_argument(
+        '--timeout',
+        type=int,
+        default=2000,
+        help='Timeout for the scan (default: 2000ms)',
+    )
+    parser.add_argument(
         'target',
         metavar='target',
         type=str,
@@ -346,6 +356,7 @@ if __name__ == '__main__':
             targets,
             concurrency,
             args.apikey,
+            args.timeout,
             args.output,
         ),
     )

@@ -34,6 +34,7 @@ export default {
       return new Response('Invalid API Key', { status: 401 });
     }
 
+    let socket_timeout = parseInt(request.headers.get('X-Socket-Timeout')) || 2000;
     let targets = await request.json();
     let scan_results = [];
     for (const target of targets['targets']) {
@@ -51,7 +52,7 @@ export default {
           let encoded = encoder.encode(target['data'] + "\r\n");
           await writer.write(encoded);
         }
-        scan_result['data'] = await readStreamWithTimeout(socket.readable, 2000);
+        scan_result['data'] = await readStreamWithTimeout(socket.readable, socket_timeout);
         scan_result['open'] = true;
       } catch (error) {
         scan_result['data'] = error

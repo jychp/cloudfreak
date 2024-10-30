@@ -30,4 +30,3 @@ TODO:
 [ ] README
 [ ] Exclude IP
 [ ] Exclude from file
-[ ] Host Timeout as header
