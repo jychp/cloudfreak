@@ -1,0 +1,29 @@
+{
+    "217.171.20.124": {
+        "21": {
+            "status": "open",
+            "data": "220 NASFTPD Turbo station 1.3.5a Server (ProFTPD)\r\n",
+            "information": {
+                "service.version": "1.3.5a",
+                "host.ip": null,
+                "service.family": "ProFTPD",
+                "service.vendor": "ProFTPD Project",
+                "service.product": "ProFTPD",
+                "service.cpe23": "cpe:/a:proftpd:proftpd:{service.version}",
+                "hw.vendor": "QNAP",
+                "hw.family": "Turbo Station",
+                "hw.device": "NAS"
+            }
+        },
+        "22": {
+            "status": "closed/filtered",
+            "data": {},
+            "information": {}
+        },
+        "8899": {
+            "status": "open",
+            "data": "\ufffd\u02a5]\u0000\u0000\u0000\u0018\ufffd\u0000\u0000\u0001\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000",
+            "information": {}
+        }
+    }
+}

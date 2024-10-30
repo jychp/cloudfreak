@@ -142,7 +142,8 @@ async def main(
     worker_url: str,
     targets: list[dict[str, str]],
     parallelism: int,
-    output_file: str | None,
+    apikey: str,
+    output_file: str | None = None,
 ):
     r7recog = Rapid7Recog()
     formated_data: dict[str, dict[int, dict[str, Any]]] = {}
@@ -150,9 +151,16 @@ async def main(
     # Do scans
     scan_semaphore = asyncio.Semaphore(parallelism)
     async with aiohttp.ClientSession() as session:
+        session.headers.update({'X-Api-Key': apikey})
         tasks = [scan(args.worker, session, scan_semaphore, payload) for payload in split_list(targets, parallelism)]
         results = await asyncio.gather(*tasks)
-        for raw_result, _ in results:
+        for raw_result, status in results:
+            if status == 500:
+                logger.critical("Internal server error, aborting")
+                exit(1)
+            if status not in (200, 201):
+                logger.error(f"Worker error {status}: {raw_result}")
+                continue
             json_result = json.loads(raw_result)
             for line in json_result['scan_results']:
                 if line['host'] not in formated_data:
@@ -218,7 +226,6 @@ if __name__ == '__main__':
     # TODO: --exlude (comma separated)
     # TODO: --excludefile
     # --host-timeout
-    # TODO: add a secret key
     parser.add_argument(
         '-p',
         type=str,
@@ -248,6 +255,12 @@ if __name__ == '__main__':
         '--ssl',
         action='store_true',
         help='Enable SSL connection',
+    )
+    parser.add_argument(
+        '--apikey',
+        type=str,
+        required=True,
+        help='API key for the worker',
     )
     parser.add_argument(
         '--data',
@@ -327,4 +340,12 @@ if __name__ == '__main__':
 
     concurrency = min(args.parallelism, len(targets))
     logger.info(f"Scanning {len(targets)} targets with {concurrency} workers")
-    asyncio.run(main(args.worker, targets, concurrency, args.output))
+    asyncio.run(
+        main(
+            args.worker,
+            targets,
+            concurrency,
+            args.apikey,
+            args.output,
+        ),
+    )

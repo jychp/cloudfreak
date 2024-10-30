@@ -23,7 +23,7 @@ https://developers.cloudflare.com/workers/platform/limits/
 
 
 
-poetry run python3 scanner.py <IP> -p 21,22,8899 -w <WORKER_URL> -v --output output.json
+poetry run python3 scanner.py <IP> -p 21,22,8899 -w <WORKER_URL> -v --output output.json --apikey <APIKEY>
 
 TODO:
 [ ] Scan hosts from file
@@ -31,4 +31,3 @@ TODO:
 [ ] Exclude IP
 [ ] Exclude from file
 [ ] Host Timeout as header
-[ ] Auth with secret key

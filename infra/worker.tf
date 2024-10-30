@@ -3,4 +3,9 @@ resource "cloudflare_workers_script" "worker" {
   name       = "cf-scanner"
   content    = file("workers/v1.js")
   module     = true
+
+  secret_text_binding {
+    name = "APIKEY"
+    text = var.cf_scanner_apikey
+  }
 }

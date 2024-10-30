@@ -30,6 +30,10 @@ export default {
     if (request.method !== 'POST') {
       return new Response('Method Not Allowed', { status: 405 });
     }
+    if (request.headers.get('X-Api-Key') !== env['APIKEY']) {
+      return new Response('Invalid API Key', { status: 401 });
+    }
+
     let targets = await request.json();
     let scan_results = [];
     for (const target of targets['targets']) {
