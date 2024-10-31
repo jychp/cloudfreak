@@ -22,6 +22,7 @@ DATA_DIR = './data'
 
 
 class Rapid7Recog:
+    # DOC
     def __init__(self):
         logger.info("Bootstraping Rapid7 Recog data for service identification")
         self._regex: dict = {}
@@ -40,6 +41,7 @@ class Rapid7Recog:
         return None
 
     def check(self, data: str) -> dict[str, str]:
+        # DOC
         # Check for SSH banners
         if data.startswith('SSH-'):
             logger.debug(f'SSH banner detected in {data}')
@@ -120,20 +122,24 @@ class Rapid7Recog:
 
 
 async def scan(
+    # DOC
         worker_url: str,
         session: aiohttp.ClientSession,
         semaphore: asyncio.Semaphore,
         targets: list[dict[str, str]],
+        host_timeout: int,
 ):
     payload = {"targets": targets}
+    timeout = len(targets) * 2 * host_timeout
     async with semaphore:
-        async with session.post(worker_url, json=payload) as response:
+        async with session.post(worker_url, json=payload, timeout=timeout) as response:
             result = await response.text()
             logger.debug(f"Response received from a worker: {result}")
             return result, response.status
 
 
 def split_list(lst: list, n: int):
+    # DOC
     k, m = divmod(len(lst), n)
     return [lst[i * k + min(i, m):(i + 1) * k + min(i + 1, m)] for i in range(n)]
 
@@ -146,6 +152,7 @@ async def main(
     timeout: int,
     output_file: str | None = None,
 ):
+    # DOC
     r7recog = Rapid7Recog()
     formated_data: dict[str, dict[int, dict[str, Any]]] = {}
 
@@ -156,7 +163,7 @@ async def main(
             'X-Api-Key': apikey,
             'X-Socket-Timeout': str(timeout),
         })
-        tasks = [scan(args.worker, session, scan_semaphore, payload) for payload in split_list(targets, parallelism)]
+        tasks = [scan(args.worker, session, scan_semaphore, payload, timeout) for payload in split_list(targets, parallelism)]
         results = await asyncio.gather(*tasks)
         for raw_result, status in results:
             if status == 500:
@@ -226,10 +233,6 @@ if __name__ == '__main__':
         help="Display debug level messsages",
         action='store_true',
     )
-    # TODO: -iL (include list)
-    # TODO: --exlude (comma separated)
-    # TODO: --excludefile
-    # --host-timeout
     parser.add_argument(
         '-p',
         type=str,
@@ -279,10 +282,16 @@ if __name__ == '__main__':
         help='Timeout for the scan (default: 2000ms)',
     )
     parser.add_argument(
+        '-i',
+        '--include',
+        type=str,
+        help='Include file (one host per line)',
+    )
+    parser.add_argument(
         'target',
         metavar='target',
         type=str,
-        nargs='+',
+        nargs='*',
         help='hostnames, IPs, CIDRs to scan',
     )
     args = parser.parse_args()
@@ -310,14 +319,21 @@ if __name__ == '__main__':
 
     # HOSTS
     hosts: list[str] = []
-    for raw_target in args.target:
+    raw_targets = list(args.target)
+    if args.include:
         try:
-            for ip in netaddr.IPNetwork(raw_target):
-                logger.debug(f"Adding {ip} to hosts")
-                hosts.append(str(ip))
-        except netaddr.core.AddrFormatError:
-            logger.debug(f"Adding {raw_target} to hosts")
-            hosts.append(raw_target)
+            with open(args.include, 'r') as f:
+                for line in f.readlines():
+                    raw_targets.append(line.strip())
+        except FileNotFoundError:
+            logger.error(f"Could not read {args.include} file")
+    if args.exclude:
+        try:
+            with open(args.exclude, 'r') as f:
+                for line in f.readlines():
+                    raw_targets.remove(line.strip())
+        except FileNotFoundError:
+            logger.error(f"Could not read {args.exclude} file")
 
     # PORTS
     ports: list[int] = []
