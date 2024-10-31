@@ -163,7 +163,15 @@ async def main(
             'X-Api-Key': apikey,
             'X-Socket-Timeout': str(timeout),
         })
-        tasks = [scan(args.worker, session, scan_semaphore, payload, timeout) for payload in split_list(targets, parallelism)]
+        tasks = [
+            scan(
+                args.worker,
+                session,
+                scan_semaphore,
+                payload,
+                timeout,
+            ) for payload in split_list(targets, parallelism)
+        ]
         results = await asyncio.gather(*tasks)
         for raw_result, status in results:
             if status == 500:
@@ -322,18 +330,19 @@ if __name__ == '__main__':
     raw_targets = list(args.target)
     if args.include:
         try:
-            with open(args.include, 'r') as f:
+            with open(args.include) as f:
                 for line in f.readlines():
                     raw_targets.append(line.strip())
         except FileNotFoundError:
             logger.error(f"Could not read {args.include} file")
-    if args.exclude:
+    for raw_target in raw_targets:
         try:
-            with open(args.exclude, 'r') as f:
-                for line in f.readlines():
-                    raw_targets.remove(line.strip())
-        except FileNotFoundError:
-            logger.error(f"Could not read {args.exclude} file")
+            for ip in netaddr.IPNetwork(raw_target):
+                logger.debug(f"Adding {ip} to hosts")
+                hosts.append(str(ip))
+        except netaddr.core.AddrFormatError:
+            logger.debug(f"Adding {raw_target} to hosts")
+            hosts.append(raw_target)
 
     # PORTS
     ports: list[int] = []

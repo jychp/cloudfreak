@@ -6,6 +6,6 @@ resource "cloudflare_workers_script" "cf-scanner" {
 
   secret_text_binding {
     name = "APIKEY"
-    text = var.cf_scanner_apikey
+    text = var.cloudfreak_apikey
   }
 }

@@ -6,7 +6,7 @@ variable "cloudflare_api_token" {
   type = string
 }
 
-variable "cf_scanner_apikey" {
+variable "cloudfreak_apikey" {
   type      = string
   sensitive = true
 }
